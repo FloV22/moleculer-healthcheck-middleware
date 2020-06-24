@@ -7,7 +7,7 @@ const http = require("http");
 const EventEmitter = require('events');
 
 const dflt = function(current, ifUndefined) {
-	return typeof current !== undefined ? ifUndefined : current;
+	return typeof current === 'undefined' ? ifUndefined : current;
 };
 
 module.exports = function(opts) {
@@ -17,6 +17,8 @@ module.exports = function(opts) {
 	opts.liveness = dflt(opts.liveness, {});
 	opts.readiness.path = dflt(opts.readiness.path, "/ready");
 	opts.liveness.path = dflt(opts.liveness.path, "/live");
+	opts.liveness.checker = dflt(opts.liveness.checker, function (next) { return next(); });
+	opts.liveness.checkerTimeoutMs = dflt(opts.liveness.checkerTimeoutMs, 20000);
 
 	let state = "down";
 	let server;
@@ -37,14 +39,26 @@ module.exports = function(opts) {
 				// Readiness if the broker started successfully.
 				// https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-readiness-probes
 				res.writeHead(state == "up" ? 200 : 503, resHeader);
+				res.end(JSON.stringify(content, null, 2));
 			} else {
 				// Liveness if the broker is not stopped.
 				// https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-a-liveness-command
-				res.writeHead(state != "down" ? 200 : 503, resHeader);
+				if (typeof opts.liveness.checker === 'function') {
+					const timeout = setTimeout(function() {
+						res.writeHead(503, resHeader);
+						res.end(JSON.stringify(content, null, 2));
+					}, opts.liveness.checkerTimeoutMs);
+
+					opts.liveness.checker(function(error) {
+						clearTimeout(timeout);
+						res.writeHead((typeof error === 'undefined' && state != "down") ? 200 : 503, resHeader);
+						res.end(JSON.stringify(content, null, 2));
+					});
+				} else {
+					res.writeHead((state != "down" || error) ? 200 : 503, resHeader);
+					res.end(JSON.stringify(content, null, 2));
+				}
 			}
-
-			res.end(JSON.stringify(content, null, 2));
-
 		} else {
 			res.writeHead(404, http.STATUS_CODES[404], {});
 			res.end();
@@ -66,6 +80,7 @@ module.exports = function(opts) {
 				// listening port is chosen by NodeJS if opts.port === 0
 				const port = server.address().port;
 
+				broker.healthcheck.port = port;
 				broker.healthcheck.emit('port', port);
 
 				broker.logger.info("");

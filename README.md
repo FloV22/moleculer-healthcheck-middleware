@@ -19,6 +19,7 @@ To check, open the http://localhost:3001/live & http://localhost:3001/ready URLs
   "timestamp": 1562790370161
 }
 ```
+
 > The `state` can be `"starting"` (503), `"up"` (200), `"stopping"` (503) or `"down"` (503).
 
 ## Usage
@@ -30,9 +31,7 @@ To check, open the http://localhost:3001/live & http://localhost:3001/ready URLs
 const HealthMiddleware = require("./health-check.middleware.js");
 
 module.exports = {
-  middlewares: [
-    HealthMiddleware()
-  ]
+  middlewares: [HealthMiddleware()],
 };
 ```
 
@@ -47,13 +46,39 @@ module.exports = {
     HealthMiddleware({
       port: 3333,
       readiness: {
-        path: "/ready"
+        path: "/ready",
       },
       liveness: {
-        path: "/live"
-      }
-    })
-  ]
+        path: "/live",
+      },
+    }),
+  ],
+};
+```
+
+In order to check liveness a little deeper, you can also give a *checker function* which takes a callback. If you give a parameter to the callback you will tell the middlware to fail the liveness check.
+Also if you do not respond in a certain amount of time, the liveness check will fail.
+
+```js
+// moleculer.config.js
+const HealthMiddleware = require("./health-check.middleware.js");
+
+module.exports = {
+  middlewares: [
+    HealthMiddleware({
+      liveness: {
+        checkerTimeoutMs: 30000, // default value
+        checker: function(next) {
+          // Execute here your liveness check...
+          if (ok) {
+            next();
+          } else {
+            next('error');
+          }
+        },
+      },
+    }),
+  ],
 };
 ```
 
@@ -75,14 +100,14 @@ spec:
         app: greeter
     spec:
       containers:
-      - name: greeter
-        image: moleculer/demo:1.4.2
-        livenessProbe:
-          httpGet:
-            path: /live
-            port: 3001
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 3001
+        - name: greeter
+          image: moleculer/demo:1.4.2
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 3001
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3001
 ```
